@@ -1,0 +1,855 @@
+---
+title: "MATH 151 Project"
+author: "Shengsheng Huo, Monica Orme, Robert Yav"
+date: '2022-05-09'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Reading and Initial Cleaning of the Data.
+```{r}
+# NOTE: replace this with the path on your device
+train <- read.csv("C:/Users/OrmeM/OneDrive/MATH 151/Project/train.csv", header=TRUE)
+```
+
+Cleaning Data
+```{r}
+# save the missing NA count in each row
+missing_value_sums = rowSums(is.na(train))
+
+# display table with missing NA count in each row
+table(missing_value_sums)
+
+# remove rows that have at least 20% missing values
+rows_to_remove_NA = which(missing_value_sums>=11)
+
+train_2 = train
+train_2 = train_2[-rows_to_remove_NA,]
+
+# Check NA values in the columns
+missing_col_sums = colSums(is.na(train_2))
+missing_col_sums
+nrow(train_2)
+
+# remove columns with at least 80% NA 
+# fence, alley, miscfeatures, poolqc
+# since most homes don't have these features
+
+# subset the columns without over 80% NA values
+data_headers <-c("SalePrice","Foundation", "BsmtQual","BsmtFinType1",
+                 "TotalBsmtSF","HeatingQC","GarageArea","MoSold","YrSold",
+                 "GrLivArea","BedroomAbvGr","KitchenAbvGr","KitchenQual",
+                 "TotRmsAbvGrd", "GarageCars","GarageFinish","GarageType","LotArea","LotFrontage","Condition1","Condition2","BldgType",
+                 "YearBuilt","OverallCond","RoofStyle","MasVnrType","MasVnrArea","Heating","ExterQual",
+                 "ExterCond","BsmtExposure","BsmtFinSF2","BsmtUnfSF","X1stFlrSF","X2ndFlrSF","GarageQual","GarageCond",
+                 "PavedDrive","WoodDeckSF","OpenPorchSF","SaleType","SaleCondition",
+                 "BsmtFullBath","Fireplaces","FullBath","HalfBath") 
+
+
+# remove columns with many NA
+train_3 = train_2[,data_headers]
+train_3
+```
+
+Further Cleaning: Fixing Variable Types
+```{r}
+
+colnames(train_3)[2]
+# save list containing column name
+# along with variable type
+var_types = matrix(nrow = ncol(train_3), ncol = 2)
+for (i in 2:ncol(train_3)) {
+  var_types[i,] = colnames(train_3)[i]
+  var_types[i,2] = class(train_3[,i])
+}
+var_types
+
+# Change character type to factor
+char_columns = vector()
+for (i in 1:ncol(train_3)) {
+  if (class(train_3[,i])=="character") {
+    char_columns = append(char_columns,i)
+  }
+}
+char_columns
+
+# change variable type
+for (i in char_columns) {
+  # change var type
+  train_3[,i] = as.factor(train_3[,i])
+}
+
+
+# check that the variables were updated
+var_types = matrix(nrow = ncol(train_3), ncol = 2)
+for (i in 2:ncol(train_3)) {
+  var_types[i,] = colnames(train_3)[i]
+  var_types[i,2] = class(train_3[,i])
+}
+var_types
+```
+
+
+Outlier Removal
+```{r}
+
+# check numeric columns
+
+# save column numbers of numeric variables
+numeric_columns = vector()
+for (i in 1:ncol(train_3)) {
+  if (class(train_3[,i])=="integer") {
+    numeric_columns = append(numeric_columns,i)
+  }
+}
+numeric_columns
+
+# subset data with numeric columns
+train_3[,numeric_columns]
+
+
+# find outliers for each of the numeric columns
+# save the row numbers containing the outliers
+
+## look at boxplots for outliers
+col_names = colnames(train_3)
+for (i in numeric_columns) {
+  boxplot(train_3[,i], plot=TRUE, main=col_names[i])
+}
+
+### Remove columns with many outliers or highly skewed data ###
+# remove these:
+# bsmtfinsf2, manvnrarea, lotarea
+
+
+# Remove columns with extreme data
+sort(colnames(train_3))
+
+which(colnames(train_3)=="BsmtFinSF2")
+which(colnames(train_3)=="MasVnrArea")
+which(colnames(train_3)=="LotArea")
+
+to_remove = c(18,27,32)
+
+# save dataset with removed outlier columns
+train_4 = train_3[,-to_remove]
+## delete observations with extreme sales prices
+sort(colnames(train_4))
+which(colnames(train_4)==c("SalePrice"))
+
+# save the rows containing extreme prices
+outlier_rows = vector()
+outliers = boxplot.stats(train_4[,1])$out
+rows_with_outliers = which(train_4[,1] %in% outliers)
+outlier_rows = append(outlier_rows,rows_with_outliers)
+outlier_rows = unique(outlier_rows)
+outlier_rows
+length(outlier_rows)
+
+
+# remove rows with outliers
+train_5 = train_4[-outlier_rows,]
+nrow(train_5)
+nrow(train_4)
+```
+
+Data Imputation
+```{r}
+# impute data
+library(mice)
+set.seed(1)
+mice_output = mice(train_5, print = FALSE, m = 1)
+final_data = complete(mice_output)
+final_data
+
+rowSums(is.na(final_data))
+```
+
+Subsetting the data into a test and training subset.
+```{r}
+set.seed(1)
+train_subset = sample(nrow(final_data), round(0.7*nrow(final_data)))
+test = final_data[-train_subset,]
+```
+
+We can now begin our modeling process. Note: since this project was split into four model types, our variable names are different, but follow the same convention of containing discernible keywords.
+
+# MULTIPLE LINEAR REGRESSION
+
+We conducted forward variable selection for multiple linear regression below to 
+help with determining an ideal model for data analysis.
+
+##
+```{r}
+#forward selection 
+
+ln_model = SalePrice~Foundation+BsmtQual+BsmtFinType1+TotalBsmtSF+HeatingQC+
+  GarageArea+MoSold+YrSold+GrLivArea+BedroomAbvGr+KitchenAbvGr+KitchenQual+
+  TotRmsAbvGrd+GarageCars+GarageFinish+GarageType+LotFrontage+Condition1+
+  Condition2+BldgType+YearBuilt+OverallCond+RoofStyle+MasVnrType+Heating+
+  ExterQual+ExterCond+BsmtExposure+BsmtUnfSF+X1stFlrSF+X2ndFlrSF+GarageQual+
+  GarageCond+PavedDrive+WoodDeckSF+OpenPorchSF+SaleType+SaleCondition+BsmtFullBath+
+  Fireplaces+FullBath+HalfBath
+
+
+res1 = lm(SalePrice~1, subset = train_subset,data = final_data)
+summary(res1) # intercept is significant 
+
+
+
+colnames(final_data)
+
+add1(res1,ln_model,subset = train_subset,data = final_data, test = "F")
+res2 = lm(SalePrice~GrLivArea, subset = train_subset,data = final_data) # GrLivArea
+
+
+add1(res2,ln_model,subset = train_subset,data = final_data, test = "F")
+res3 = lm(SalePrice~GrLivArea+YearBuilt,subset = train_subset,data = final_data)# YearBuilt
+
+
+add1(res3,ln_model,subset = train_subset,data = final_data, test = "F")
+res4 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual, 
+          subset = train_subset,data = final_data) #KitchenQual 
+
+
+add1(res4,ln_model,subset = train_subset,data = final_data, test = "F")
+res5 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF,
+          subset = train_subset,data = final_data)#TotalBsmtSF  
+
+
+add1(res5,ln_model,subset = train_subset,data = final_data, test = "F")
+res6 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2,subset = train_subset,data = final_data)#Condition2   
+
+
+add1(res6,ln_model,subset = train_subset,data = final_data, test = "F")
+res7 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond,subset = train_subset,data = final_data)#OverallCond 
+
+add1(res7,ln_model,subset = train_subset,data = final_data, test = "F")
+res8 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual ,subset = train_subset,data = final_data)#BsmtQual 
+
+
+add1(res8,ln_model,subset = train_subset,data = final_data, test = "F")
+res9 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType ,subset = train_subset,data = final_data)#BldgType 
+
+add1(res9,ln_model,subset = train_subset,data = final_data, test = "F")
+res10 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea,
+           subset = train_subset,data = final_data)#GarageArea 
+
+
+add1(res10,ln_model,subset = train_subset,data = final_data, test = "F")
+res11 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+             OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces,
+           subset = train_subset,data = final_data)#Fireplaces   
+
+
+add1(res11,ln_model,subset = train_subset,data = final_data, test = "F")
+res12 = lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+             OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1,
+           subset = train_subset,data = final_data)#BsmtFinType1   
+
+add1(res12,ln_model,subset = train_subset,data = final_data, test = "F")
+res13= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+             OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+ExterQual,
+           subset = train_subset,data = final_data)# ExterQual    
+
+add1(res13,ln_model,subset = train_subset,data = final_data, test = "F")
+res14= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+
+            ExterQual+BsmtExposure,
+          subset = train_subset,data = final_data)# BsmtExposure 
+
+
+add1(res14,ln_model,subset = train_subset,data = final_data, test = "F")
+res15= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+
+            ExterQual+BsmtExposure +Condition1 ,
+          subset = train_subset,data = final_data)# Condition1 
+
+add1(res15,ln_model,subset = train_subset,data = final_data, test = "F")
+res16= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+
+            ExterQual+BsmtExposure +Condition1+SaleCondition  ,
+          subset = train_subset,data = final_data)# SaleCondition 
+
+
+add1(res16,ln_model,subset = train_subset,data = final_data, test = "F")
+res17= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+
+            ExterQual+BsmtExposure +Condition1+SaleCondition+BsmtUnfSF   ,
+          subset = train_subset,data = final_data)# BsmtUnfSF  
+
+add1(res17,ln_model,subset = train_subset,data = final_data, test = "F")
+res18= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+
+            ExterQual+BsmtExposure +Condition1+SaleCondition+BsmtUnfSF+KitchenAbvGr,
+          subset = train_subset,data = final_data)# KitchenAbvGr
+
+
+add1(res18,ln_model,subset = train_subset,data = final_data, test = "F")
+res19= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+
+            ExterQual+BsmtExposure +Condition1+SaleCondition+BsmtUnfSF+
+            KitchenAbvGr+SaleType ,
+          subset = train_subset,data = final_data)# SaleType  
+
+
+add1(res19,ln_model,subset = train_subset,data = final_data, test = "F")
+res20= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+
+            ExterQual+BsmtExposure +Condition1+SaleCondition+BsmtUnfSF+
+            KitchenAbvGr+SaleType+GarageCars ,
+          subset = train_subset,data = final_data)# GarageCars
+
+add1(res20,ln_model,subset = train_subset,data = final_data, test = "F")
+res21= lm(SalePrice~GrLivArea+YearBuilt+KitchenQual+TotalBsmtSF+Condition2+
+            OverallCond+BsmtQual+BldgType+GarageArea+Fireplaces+BsmtFinType1+
+            ExterQual+BsmtExposure +Condition1+SaleCondition+BsmtUnfSF+
+            KitchenAbvGr+SaleType+GarageCars+HeatingQC ,
+          subset = train_subset,data = final_data)#HeatingQC 
+
+add1(res21,ln_model,subset = train_subset,data = final_data, test = "F")
+summary(res21)
+
+MSE = mean(res21$residuals^2)
+MSE
+anova(res21)
+```
+
+DECISION TREE
+
+Subsetting the data into appropriate test and training sets.
+```{r}
+set.seed(1)
+train_subset = sample(nrow(final_data), round(0.7*nrow(final_data)))
+house_tr=final_data[train_subset,]
+house_test=final_data[-train_subset,]
+house_tr
+house_test
+```
+
+Creating a decision tree model.
+```{r}
+library(tree)
+house.tree=tree(SalePrice~.,data=house_tr)
+plot(house.tree)
+text(house.tree)
+tree.pred <- predict(house.tree, house_test)
+mse=sum((tree.pred-house_test$SalePrice)^2,na.rm=TRUE)
+mse
+```
+
+Performing cross validation and pruning the decision tree. Note: The MSE seems to be greater than the original decision tree model at any level < 10.
+```{r}
+cv.house=cv.tree(house.tree,FUN=prune.tree)
+cv.house
+plot(cv.house$size,cv.house$dev)
+#Choose best=6?
+prune.house=prune.tree(house.tree,best=6)
+plot(prune.house)
+text(prune.house)
+prune.house.pred=predict(prune.house,house_test)
+MSE=sum((prune.house.pred-house_test$SalePrice)^2,na.rm=TRUE)
+MSE
+```
+
+KERNEL REGRESSION
+Subsetting training and test data.
+```{r}
+# load library
+library(regpro)
+
+# subset the numeric columns in 
+# the finalized dataset
+numeric_columns = vector()
+for (i in 1:ncol(final_data)) {
+  if (class(final_data[,i])=="integer") {
+    numeric_columns = append(numeric_columns,i)
+  }
+}
+numeric_columns
+
+
+numeric_data = final_data[,numeric_columns]
+
+set.seed(1)
+train_subset = sample(nrow(numeric_data), round(0.7*nrow(numeric_data)))
+
+train.X = log(numeric_data[train_subset,2:ncol(numeric_data)])
+train.Y = numeric_data[train_subset,1]
+
+test.X = log(numeric_data[-train_subset,2:ncol(numeric_data)])
+test.Y = numeric_data[-train_subset,1]
+```
+
+Tuning the Bandwidth. The function below computes the MSE's for kernel regression on the test data.
+```{r}
+library(regpro)
+kernel_predict_MSE = function(test_x, test_y, train_x, train_y, bandwidth) {
+  kernel_predictions = numeric(nrow(as.matrix(test_x)))
+  for (i in 1:nrow(as.matrix(test_x))) {
+    # save the predicted kernel regression values
+    # for each row in the test vector
+    kernel_predictions[i] = kernesti.regr(as.matrix(test_x[i,]), 
+                                          as.matrix(train_x), 
+                                          as.matrix(train_y), h=bandwidth)
+  }
+  # compute the MSE
+  MSE_kernel = mean((as.numeric(as.matrix(test_y)) - kernel_predictions)^2)
+  return(MSE_kernel)
+}
+```
+
+The model's bandwidth has been tuned using the MSE (mean square error). This means
+that we choose the bandwidth that yields the lowest MSE without overfitting
+the model. The tuning function below accounts for this by choosing bandwidth
+that meets this criteria before the MSE begins to increase for higher bandwidth
+sizes.
+```{r}
+kernel_regression_tuning = function(test_x, test_y, train_x, train_y) { 
+  bandwidths = numeric()
+  kernel_MSEs = numeric()
+  bandwidths[1] = 0.1
+  kernel_MSEs[1] = kernel_predict_MSE(test_x, test_y, train_x, train_y, 0.1)
+  bandwidth_tuning = 0.2
+  
+  for (i in 2:nrow(as.matrix(test_x))) {
+    # continue computing MSEs of the test data
+    # on kernel regression
+    # until the MSE increases in the next iteration
+    
+    # save the MSEs on the test data for kernel regression
+    kernel_MSEs[i] = kernel_predict_MSE(test_x, test_y, train_x, train_y, bandwidth_tuning)
+    
+    # if the current MSE is larger
+    # than the previous one, 
+    # exit the loop
+    if (kernel_MSEs[i-1]  < kernel_MSEs[i]) {
+      break 
+    }
+    
+    # increment the bandwidth value
+    bandwidth_tuning = bandwidth_tuning + 0.1
+    
+  }
+  return(bandwidth_tuning)
+}
+
+tuning_parameter = kernel_regression_tuning(test_x = test.X, test_y = test.Y, train_x = train.X, train_y = train.Y)
+tuning_parameter
+
+kernel_predict_MSE(test_x = test.X, test_y = test.Y, train_x = train.X, train_y = train.Y, tuning_parameter)
+```
+
+After tuning the bandwidth, the resulting MSE of the kernel regression model is 3479005530. 
+We can note that this is high due to high number of observations and predictors that have been
+considered in this model.
+
+After checking the MSEs on the decision tree, multiple linear regression, and kernel regression, we ultimately
+chose the multiple linear regression since it had the lowest MSE, which indicates that on average
+the error between the actual house prices and predicted house prices was lower.
+
+We chose to do linear regression on just continuous data to reduce the amount of interaction that would need to be calculated.
+Subsetting Numeric Columns
+```{r}
+numeric_columns = vector()
+for (i in 1:ncol(final_data)) {
+  if (class(final_data[,i])=="integer") {
+    numeric_columns = append(numeric_columns,i)
+  }
+}
+numeric_columns
+```
+
+Backwards Variable Selection
+```{r}
+# subset to numeric data
+numeric_data = final_data[,numeric_columns]
+
+
+# apply backward selection
+model_1 = lm(SalePrice~., subset = train_subset,data = numeric_data)
+drop1(model_1,SalePrice~.,subset = train_subset,data = numeric_data, test = "F")
+
+# MoSold        1 8.1567e+07 6.3805e+11 19737   0.1212 0.7278082
+# step 2: drop MoSol with p-val 0.7278082        
+
+model2 = lm(SalePrice~.-MoSold, subset = train_subset,data = numeric_data)
+drop1(model2,SalePrice~.-MoSold,subset = train_subset,data = numeric_data, test = "F")
+
+
+# LotFrontage   1 4.5096e+07 6.3810e+11 19735   0.0671 0.7957039 
+# step 3: remove LotFrontage with p-val 0.7957039    
+
+model3 = lm(SalePrice~.-MoSold-LotFrontage, subset = train_subset,data = numeric_data)
+drop1(model3,SalePrice~.-MoSold-LotFrontage,subset = train_subset,data = numeric_data, test = "F")
+
+# YrSold        1 2.3484e+08 6.3833e+11 19734   0.3496 0.5544648 
+# step 3: remove YrSold with p-val 0.5544648    
+model4 = lm(SalePrice~.-MoSold-LotFrontage-YrSold, subset = train_subset,data = numeric_data)
+drop1(model4,SalePrice~.-MoSold-LotFrontage-YrSold,subset = train_subset,data = numeric_data, test = "F")
+
+# GrLivArea     1 2.7805e+08 6.3861e+11 19732   0.4143  0.519975
+# step 4: remove LotFrontage with p-val 0.519975   
+model5 = lm(SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea, subset = train_subset,data = numeric_data)
+drop1(model5,SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea,subset = train_subset,data = numeric_data, test = "F")
+
+# BsmtUnfSF     1 3.8161e+08 6.3899e+11 19731   0.5689 0.4508907
+# step 5: remove BsmtUnfSF with p-val 0.4508907 
+model6 = lm(SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF, subset = train_subset,data = numeric_data)
+drop1(model6,SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF,subset = train_subset,data = numeric_data, test = "F")
+
+# FullBath      1 7.7957e+08 6.3977e+11 19730   1.1627 0.2811867
+# step 6 remove FullBath with p-val 0.2811867
+model7 = lm(SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF-FullBath, subset = train_subset,data = numeric_data)
+drop1(model7,SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF-FullBath,subset = train_subset,data = numeric_data, test = "F")
+
+# OpenPorchSF   1 2.0471e+09 6.4182e+11 19731   3.0525 0.0809337
+# step 7 remove OpenPorchSF with p-val 0.0809337
+model8 = lm(SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF-FullBath-OpenPorchSF, subset = train_subset,data = numeric_data)
+drop1(model8,SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF-FullBath-OpenPorchSF,subset = train_subset,data = numeric_data, test = "F")
+
+# HalfBath      1 2.2173e+09 6.4404e+11 19732   3.2992 0.0696266
+# step 8 - remove HalfBath with p-val 0.0696266
+model9 = lm(SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF-FullBath-OpenPorchSF-HalfBath, subset = train_subset,data = numeric_data)
+drop1(model9,SalePrice~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF-FullBath-OpenPorchSF-HalfBath,subset = train_subset,data = numeric_data, test = "F")
+
+
+summary(model9)
+```
+
+
+Assumption Checking
+```{r}
+# Before we proceed with the model interpretation, 
+# we must check the assumptions
+mean(model9$residuals^2)
+
+# We can note that the MSE on the training set is large.
+
+## Assumption Verification
+
+# normality
+qqnorm(model9$residuals)
+qqline(model9$residuals)
+
+# constant variance
+plot(model9$fitted.values, model9$residuals, ylab = "Residuals", xlab = "Fitted Values",
+     main = "Residuals Vs. Fitted Values")
+# The constant variance assumption has been violated since 
+# there is no random spread in the plot
+
+# uncorrelated error
+plot(model9$residuals, ylab = "Residuals", main = "Residual Plot")
+```
+
+# We can note that the adjusted R^2 is 0.8046 
+# meaning that 80.46% of the variation in the
+# data is explained by the model
+
+
+
+
+# We will apply a log transformation since
+# the constant variance assumption
+# has been violated
+
+## Logarithm Transformation
+```{r}
+log_model = lm(log(SalePrice)~.-MoSold-LotFrontage-YrSold-GrLivArea-BsmtUnfSF-FullBath-OpenPorchSF-HalfBath, subset = train_subset,data = numeric_data)
+summary(log_model)
+
+```
+
+
+
+## Assumption Verification
+
+# normality
+
+```{r}
+qqnorm(log_model$residuals)
+qqline(log_model$residuals)
+
+```
+
+# Normality assumption is satisfied
+
+# constant variance
+```{r}
+plot(log_model$fitted.values, log_model$residuals, ylab = "Residuals", xlab = "Fitted Values",
+     main = "Residuals Vs. Fitted Values")
+```
+
+
+
+# uncorrelated error
+```{r}
+plot(log_model$residuals, ylab = "Residuals",
+     main = "Residual Plot")
+
+```
+
+
+
+# linearity
+```{r}
+plot(numeric_data$TotalBsmtSF[train_subset], log_model$residuals, ylab = "Residuals", xlab = "Total Basement Square Footage",
+     main = "Residuals Vs. Total Basement Square Footage")
+plot(numeric_data$SalePrice,numeric_data$YearBuilt)
+
+```
+
+
+
+# Most of the assumptions have still been violated
+# We can apply kmeans to the data
+# and apply the multiple linear regression models
+# to each cluster
+
+
+## K means
+
+# subset variables based on variable selection
+```{r}
+to_remove_names = c("MoSold", "LotFrontage", "YrSold", "GrLivArea", "BsmtUnfSF","FullBath",
+                    "OpenPorchSF", "HalfBath")
+```
+
+```{r}
+to_remove_cols = vector()
+for (i in 1:length(to_remove_names)) {
+  to_remove_cols = append(to_remove_cols, grep(to_remove_names[i],colnames(final_data)))
+}
+to_remove_cols
+
+```
+
+
+
+
+# remove columns that were deleted in variable selection
+```{r}
+kmeans_data = numeric_data[,-to_remove_cols]
+```
+
+
+```{r}
+library(cluster)
+
+# store the kmeans outputs
+kmeans_outputs = list()
+
+# store the C(G) ratios
+ratios = numeric()
+
+for (i in 2:6) {
+  set.seed(1)
+  # save outputs
+  kmeans_outputs[[i]] =  kmeans(x = kmeans_data, centers = i, nstart = 10)
+  # compute C(G) ratio - measuring cluster strength
+  ratios[i] = kmeans_outputs[[i]]$betweenss*(nrow(kmeans_data)-i)/(kmeans_outputs[[i]]$tot.withinss*(i-1))
+}
+ratios_frame = cbind(2:6,ratios[2:6])
+colnames(ratios_frame) = c("Cluster","Ratio")
+ratios_frame
+# view which cluster yielded the highest C(G) ratio
+print("The cluster amount that yields the highest C(G) ratio is " )
+print(as.character(which.max(ratios)))
+
+```
+
+We can note that at 6 clusters that the C(G) ratio is maximized
+
+We will also compute the silhouette values to assess how well the observations
+are split into the clusters.
+
+```{r}
+par(mfrow=c(2,3))
+avg_silhouette_values = numeric()
+for (i in 2:6) {
+  silhouette_values = silhouette(x= kmeans_outputs[[i]]$cluster,dist=dist(kmeans_data)) # computes the silhouette values
+  plot(silhouette_values,main="Silhouette Plot of Two Groups Solution",col="blue") # gives a plot of the silhouette values
+  avg_silhouette_values[i] = mean(silhouette_values[,3])
+}
+par(mfrow=c(1,1))
+
+```
+```{r}
+silhouette_frame = cbind(2:6,avg_silhouette_values[2:6])
+colnames(silhouette_frame) = c("Cluster","Average Silhouette Width")
+silhouette_frame
+```
+
+
+
+We will choose 5 clusters since the average silhouette of 0.54
+width is the same as 6 clusters and the C(G) ratio
+for 5 clusters is not much lower compared to 6 clusters
+
+
+
+
+We can also plot the sales prices based on the clusters
+```{r}
+kmeans_data$Cluster = kmeans_outputs[[5]]$cluster
+plot(kmeans_data$SalePrice, col = kmeans_data$Cluster)
+
+```
+We can note that k-means grouped the clusters based on sales price well since there
+are clear distinctions in the sales prices
+for each cluster.
+
+
+We will apply Multiple Linear Regression to each cluster
+since the groups will be homogeneous.
+```{r}
+# Cluster 1
+cluster1_model = lm(SalePrice~.-Cluster, data = kmeans_data[kmeans_data$Cluster==1,])
+summary(cluster1_model)
+kmeans_data$Cluster = kmeans_outputs[[5]]$cluster
+
+
+# Cluster 2
+cluster2_model = lm(SalePrice~.-Cluster, data = kmeans_data[kmeans_data$Cluster==2,])
+summary(cluster2_model)
+
+# Cluster 3
+cluster3_model = lm(SalePrice~.-Cluster, data = kmeans_data[kmeans_data$Cluster==3,])
+summary(cluster3_model)
+
+# cluster 4
+cluster4_model = lm(SalePrice~.-Cluster, data = kmeans_data[kmeans_data$Cluster==4,])
+summary(cluster4_model)
+
+# cluster 5
+cluster5_model = lm(SalePrice~.-Cluster, data = kmeans_data[kmeans_data$Cluster==4,])
+summary(cluster5_model)
+
+```
+
+We won't proceed with further analysis
+on these models since the adjusted R^2
+is less than 0.5 for each model.
+
+## Regression Random Forest Tree
+
+Another model that we have tested to predict housing prices
+is the random forest regression tree model. To begin, we will tune
+the mtry variable. This will be done by comparing the MSEs for various
+values of mtry from 1, .., 15. We will choose the one that yields the
+lowest MSE without overfitting.
+
+
+```{r setup, include=FALSE}
+# run library
+
+
+```
+
+
+
+```{r}
+# tune mtry 
+library(tree)
+library(randomForest)
+
+MSEs = numeric()
+for (i in 1:15) {
+  # build tree model
+  set.seed(1)
+  house_rf_tree = randomForest(SalePrice~., data = final_data, subset = train_subset, 
+                               mtry = i, importance = TRUE, seed = 1 )
+  # obtain estimates
+  salesprice_hat = predict(house_rf_tree, final_data[-train_subset,])
+  
+  # save the prediction rates
+  MSEs[i] = mean((salesprice_hat - final_data[-train_subset,1])^2)
+  
+  # exit if the current prediction rate doesn't improve 
+  if(MSEs[i] > MSEs[i-1] && i!=1) {
+  break
+  }
+}
+MSEs
+mtry_value = which.min(MSEs)
+mtry_value
+
+# use mtry value of 10 since this yielded the
+# lowest MSE without overfitting
+
+```
+
+After tuning the MSE, we obtained mtry = 10 as the optimal value. Now,
+we can run the model.
+
+```{r}
+set.seed(1)
+train_subset = sample(nrow(final_data), round(0.7*nrow(final_data)))
+set.seed(1)
+house_rf = randomForest(SalePrice~., data = final_data, subset = train_subset, 
+                        mtry = mtry_value, importance = TRUE)
+
+house_rf
+
+```
+The model explains 85.07% of the variance. This is the best model out of the ones
+that we have investigated since it explains the variance more than half of the time.
+
+We can further assess the model's fit by computing the MSE on the test
+and the training datasets.
+
+```{r}
+# predict the test
+saleprice_pred_test = predict(house_rf, final_data[-train_subset,])
+mse_test = mean((saleprice_pred_test - final_data[-train_subset,1])^2)
+mse_test
+
+saleprice_pred_train = predict(house_rf, final_data[train_subset,])
+mse_train = mean((saleprice_pred_train - final_data[train_subset,1])^2)
+mse_train
+
+
+```
+We can note that the model's test MSE is on the higher end since there
+are many predictors that are included in the dataset. The training MSE is
+lower than the test MSE. However, this is expected since the model was built
+using the training data.
+
+We can further assess the model's fit by plotting the predicted sales prices
+using the test dataset against the actual test sales prices
+
+
+```{r}
+# plot the predicted values vs actual test values
+plot(saleprice_pred_test, final_data[-train_subset,1], ylab = "Test Housing Prices",
+     xlab = "Predicted Sales Prices")
+abline(0, 1)
+
+```
+We can note that the scatterplot generally follows a linear trend, which shows that 
+the model predicted most of the sales prices well. However, it can be noted
+that as the housing prices increase, the predicted housing sales prices often deviated
+from the actual test housing sales prices.
+
+
+We can also assess the most important variables that were used to assess
+the model
+```{r}
+importance(house_rf)
+
+```
+
+```{r}
+varImpPlot(house_rf)
+```
+
+We can note that the most important variables are GrLivArea is one of the 
+most important variables since it leads to higher percentage increase in
+the MSE.
