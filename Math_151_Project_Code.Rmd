@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 Reading and Initial Cleaning of the Data.
 ```{r}
 # NOTE: replace this with the path on your device
-train <- read.csv("C:/Users/OrmeM/OneDrive/MATH 151/Project/train.csv", header=TRUE)
+train <- read.csv("train.csv", header=TRUE)
 ```
 
 Cleaning Data
